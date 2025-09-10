@@ -120,6 +120,11 @@ func (p *Provider) convertToLibdnsRecord(sr spaceshipRecord, zone string) libdns
 	name := strings.TrimSuffix(sr.Name, "."+zone)
 	name = strings.TrimSuffix(name, ".")
 	
+	// If the name equals the zone, it's the root record
+	if name == zone || sr.Name == zone {
+		name = ""
+	}
+	
 	ttl := time.Duration(sr.TTL) * time.Second
 	
 	switch strings.ToUpper(sr.Type) {
