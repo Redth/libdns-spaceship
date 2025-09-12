@@ -76,7 +76,11 @@ This provider supports the following DNS record types:
 - TXT records (`libdns.TXT`)
 - CNAME records (`libdns.CNAME`)  
 - MX records (`libdns.MX`)
-- Other record types fall back to `libdns.RR`
+- SRV records (`libdns.SRV`)
+- NS records (`libdns.NS`)
+- CAA records (`libdns.CAA`)
+
+Unsupported record types (such as PTR, HTTPS, TLSA, etc.) are filtered out and not returned by `GetRecords`.
 
 ## API Documentation
 

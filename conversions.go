@@ -76,23 +76,13 @@ func (p *Provider) toLibdnsRR(sr spaceshipRecordUnion, zone string) libdns.Recor
 		}
 		return libdns.CAA{Name: name, TTL: ttl, Flags: f8, Tag: sr.Tag, Value: sr.Value, ProviderData: sr}
 	}
-	// Fallback to a generic RR for unsupported or un-special-cased types (PTR/CAA/etc.)
-	return libdns.RR{Name: name, TTL: ttl, Type: sr.Type, Data: func() string {
-		if sr.Pointer != "" {
-			return sr.Pointer
-		}
-		if sr.Value != "" {
-			return sr.Value
-		}
-		if sr.Nameserver != "" {
-			return sr.Nameserver
-		}
-		return ""
-	}()}
+	// Return nil for unsupported record types (including PTR) - they will be filtered out
+	return nil
 }
 
 // fromLibdnsRR converts a libdns.Record into a spaceshipRecordUnion suitable for create/update
-func (p *Provider) fromLibdnsRR(lr libdns.Record, zone string) spaceshipRecordUnion {
+// Returns nil for unsupported record types
+func (p *Provider) fromLibdnsRR(lr libdns.Record, zone string) *spaceshipRecordUnion {
 	rr := lr.RR()
 	name := rr.Name
 	if name == "" {
@@ -106,7 +96,7 @@ func (p *Provider) fromLibdnsRR(lr libdns.Record, zone string) spaceshipRecordUn
 	if mx, ok := lr.(libdns.MX); ok {
 		rec.Exchange = mx.Target
 		rec.Preference = int(mx.Preference)
-		return rec
+		return &rec
 	}
 
 	// Handle SRV records (both typed and textual)
@@ -121,7 +111,7 @@ func (p *Provider) fromLibdnsRR(lr libdns.Record, zone string) spaceshipRecordUn
 		if rec.PortInt != 0 {
 			rec.Port = rec.PortInt
 		}
-		return rec
+		return &rec
 	}
 	if strings.ToUpper(rr.Type) == "SRV" {
 		// Parse textual SRV record
@@ -146,17 +136,17 @@ func (p *Provider) fromLibdnsRR(lr libdns.Record, zone string) spaceshipRecordUn
 				rec.Protocol = "_" + strings.TrimPrefix(labels[1], "_")
 			}
 		}
-		return rec
+		return &rec
 	}
 
 	// Handle NS records (both typed and textual)
 	if ns, ok := lr.(libdns.NS); ok {
 		rec.Nameserver = ns.Target
-		return rec
+		return &rec
 	}
 	if strings.ToUpper(rr.Type) == "NS" {
 		rec.Nameserver = rr.Data
-		return rec
+		return &rec
 	}
 
 	// Handle CAA records (both typed and textual)
@@ -167,7 +157,7 @@ func (p *Provider) fromLibdnsRR(lr libdns.Record, zone string) spaceshipRecordUn
 		rec.Flag = tmpFlag
 		rec.Tag = caa.Tag
 		rec.Value = caa.Value
-		return rec
+		return &rec
 	}
 	if strings.ToUpper(rr.Type) == "CAA" {
 		// Parse textual CAA record
@@ -180,7 +170,7 @@ func (p *Provider) fromLibdnsRR(lr libdns.Record, zone string) spaceshipRecordUn
 			rec.Tag = parts[1]
 			rec.Value = strings.Join(parts[2:], " ")
 		}
-		return rec
+		return &rec
 	}
 
 	switch v := lr.(type) {
@@ -192,17 +182,10 @@ func (p *Provider) fromLibdnsRR(lr libdns.Record, zone string) spaceshipRecordUn
 		rec.Cname = v.Target
 	case libdns.MX:
 		// already handled
-	case libdns.RR:
-		// Handle remaining textual RR types (PTR and others)
-		switch strings.ToUpper(rr.Type) {
-		case "PTR":
-			rec.Pointer = rr.Data
-		default:
-			rec.Value = rr.Data
-		}
 	default:
-		rec.Value = rr.Data
+		// Unsupported record type (including libdns.RR)
+		return nil
 	}
-	return rec
+	return &rec
 }
 

@@ -44,7 +44,9 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 			return nil, fmt.Errorf("failed to unmarshal records response: %w", err)
 		}
 		for _, sr := range lr.Items {
-			records = append(records, p.toLibdnsRR(sr, zone))
+			if record := p.toLibdnsRR(sr, zone); record != nil {
+				records = append(records, record)
+			}
 		}
 		if skip+len(lr.Items) >= lr.Total {
 			break
@@ -66,7 +68,9 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 
 	var items []spaceshipRecordUnion
 	for _, r := range records {
-		items = append(items, p.fromLibdnsRR(r, zone))
+		if item := p.fromLibdnsRR(r, zone); item != nil {
+			items = append(items, *item)
+		}
 	}
 
 	payload := map[string]interface{}{
@@ -87,7 +91,9 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 	// Return records converted from the request payload as the representation of what was created
 	var added []libdns.Record
 	for _, it := range items {
-		added = append(added, p.toLibdnsRR(it, zone))
+		if record := p.toLibdnsRR(it, zone); record != nil {
+			added = append(added, record)
+		}
 	}
 	return added, nil
 }
@@ -101,7 +107,9 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 	zone = strings.TrimSuffix(zone, ".")
 	var items []spaceshipRecordUnion
 	for _, r := range records {
-		items = append(items, p.fromLibdnsRR(r, zone))
+		if item := p.fromLibdnsRR(r, zone); item != nil {
+			items = append(items, *item)
+		}
 	}
 	payload := map[string]interface{}{
 		"force": true,
@@ -131,38 +139,12 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 	zone = strings.TrimSuffix(zone, ".")
 	var items []spaceshipRecordUnion
 	for _, rec := range records {
-		// If the concrete libdns type carries ProviderData with the original spaceshipRecord,
-		// prefer using that exact payload to delete the record (avoids mismatches).
-		var item spaceshipRecordUnion
-		switch r := rec.(type) {
-		case libdns.Address:
-			if pd, ok := r.ProviderData.(spaceshipRecordUnion); ok {
-				item = pd
-			} else {
-				item = p.fromLibdnsRR(rec, zone)
-			}
-		case libdns.TXT:
-			if pd, ok := r.ProviderData.(spaceshipRecordUnion); ok {
-				item = pd
-			} else {
-				item = p.fromLibdnsRR(rec, zone)
-			}
-		case libdns.CNAME:
-			if pd, ok := r.ProviderData.(spaceshipRecordUnion); ok {
-				item = pd
-			} else {
-				item = p.fromLibdnsRR(rec, zone)
-			}
-		case libdns.MX:
-			if pd, ok := r.ProviderData.(spaceshipRecordUnion); ok {
-				item = pd
-			} else {
-				item = p.fromLibdnsRR(rec, zone)
-			}
-		default:
-			item = p.fromLibdnsRR(rec, zone)
+		item := p.fromLibdnsRR(rec, zone)
+		if item == nil {
+			rr := rec.RR()
+			return nil, fmt.Errorf("unsupported record type for deletion: %s", rr.Type)
 		}
-		items = append(items, item)
+		items = append(items, *item)
 	}
 	endpoint := fmt.Sprintf("/v1/dns/records/%s", zone)
 	_, status, err := p.doRequest(ctx, "DELETE", endpoint, items)
