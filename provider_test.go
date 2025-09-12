@@ -242,11 +242,11 @@ func TestConvertToLibdnsRecord_ExtendedTypes(t *testing.T) {
 		t.Fatalf("unexpected NS conversion type: %T", rr)
 	}
 
-	// PTR (unchanged)
+	// PTR (unsupported - should return nil)
 	ptr := spaceshipRecordUnion{ResourceRecordBase: ResourceRecordBase{Type: "PTR", Name: "1.1.1.in-addr.arpa", TTL: 3600}, Pointer: fmt.Sprintf("host.%s", zone)}
 	rr = provider.toLibdnsRR(ptr, zone)
-	if r, ok := rr.(libdns.RR); !ok || r.Type != "PTR" || r.Data != fmt.Sprintf("host.%s", zone) {
-		t.Fatalf("unexpected PTR conversion: %#v", rr)
+	if rr != nil {
+		t.Fatalf("PTR records should be unsupported and return nil, got: %#v", rr)
 	}
 
 	// CAA
