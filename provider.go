@@ -46,7 +46,7 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 		for _, sr := range lr.Items {
 			records = append(records, p.toLibdnsRR(sr, zone))
 		}
-		if len(records) >= lr.Total {
+		if skip+len(lr.Items) >= lr.Total {
 			break
 		}
 		skip += take
@@ -175,19 +175,6 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 	return records, nil
 }
 
-// Provider-specific typed libdns.Record implementations for types libdns doesn't natively model.
-// These types implement libdns.Record by providing an RR() method.
-
-type NSRecord struct {
-	Name         string
-	TTL          time.Duration
-	Nameserver   string
-	ProviderData spaceshipRecordUnion
-}
-
-func (n NSRecord) RR() libdns.RR {
-	return libdns.RR{Name: n.Name, TTL: n.TTL, Type: "NS", Data: n.Nameserver}
-}
 
 // Interface guards
 var (

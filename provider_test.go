@@ -75,7 +75,7 @@ func TestProvider_ConvertToLibdnsRecord(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := provider.convertToLibdnsRecord(tt.input, zone)
+			result := provider.toLibdnsRR(tt.input, zone)
 			switch tt.expected {
 			case "libdns.Address":
 				if _, ok := result.(libdns.Address); !ok {
@@ -141,7 +141,7 @@ func TestProvider_ConvertFromLibdnsRecord(t *testing.T) {
 		IP:   netip.MustParseAddr("192.0.2.1"),
 	}
 
-	result := provider.convertFromLibdnsRecord(addr, zone)
+	result := provider.fromLibdnsRR(addr, zone)
 	if result.Name != fmt.Sprintf("test.%s", zone) {
 		t.Errorf("Expected full name, got %s", result.Name)
 	}
@@ -221,14 +221,14 @@ func TestConvertToLibdnsRecord_ExtendedTypes(t *testing.T) {
 
 	// SRV
 	srv := spaceshipRecordUnion{ResourceRecordBase: ResourceRecordBase{Type: "SRV", Name: fmt.Sprintf("_sip._tcp.%s", zone), TTL: 3600}, Priority: 10, Weight: 20, PortInt: 5060, Port: "5060", Target: fmt.Sprintf("sip.%s", zone)}
-	rr := provider.convertToLibdnsRecord(srv, zone)
+	rr := provider.toLibdnsRR(srv, zone)
 	if r, ok := rr.(libdns.SRV); !ok || r.Priority != 10 || r.Weight != 20 || r.Port != 5060 || r.Target != fmt.Sprintf("sip.%s", zone) || r.Service != "sip" || r.Transport != "tcp" {
 		t.Fatalf("unexpected SRV conversion: %#v", rr)
 	}
 
 	// NS
 	ns := spaceshipRecordUnion{ResourceRecordBase: ResourceRecordBase{Type: "NS", Name: zone, TTL: 3600}, Nameserver: fmt.Sprintf("ns1.%s", zone)}
-	rr = provider.convertToLibdnsRecord(ns, zone)
+	rr = provider.toLibdnsRR(ns, zone)
 	// prefer libdns.NS if available, otherwise fall back to libdns.RR
 	if r, ok := rr.(libdns.NS); ok {
 		if r.Target != fmt.Sprintf("ns1.%s", zone) {
@@ -244,7 +244,7 @@ func TestConvertToLibdnsRecord_ExtendedTypes(t *testing.T) {
 
 	// PTR (unchanged)
 	ptr := spaceshipRecordUnion{ResourceRecordBase: ResourceRecordBase{Type: "PTR", Name: "1.1.1.in-addr.arpa", TTL: 3600}, Pointer: fmt.Sprintf("host.%s", zone)}
-	rr = provider.convertToLibdnsRecord(ptr, zone)
+	rr = provider.toLibdnsRR(ptr, zone)
 	if r, ok := rr.(libdns.RR); !ok || r.Type != "PTR" || r.Data != fmt.Sprintf("host.%s", zone) {
 		t.Fatalf("unexpected PTR conversion: %#v", rr)
 	}
@@ -252,7 +252,7 @@ func TestConvertToLibdnsRecord_ExtendedTypes(t *testing.T) {
 	// CAA
 	zero := 0
 	caa := spaceshipRecordUnion{ResourceRecordBase: ResourceRecordBase{Type: "CAA", Name: zone, TTL: 3600}, Flag: &zero, Tag: "issue", Value: "letsencrypt.org"}
-	rr = provider.convertToLibdnsRecord(caa, zone)
+	rr = provider.toLibdnsRR(caa, zone)
 	if r, ok := rr.(libdns.CAA); ok {
 		if r.Tag != "issue" || r.Value != "letsencrypt.org" || r.Flags != 0 {
 			t.Fatalf("unexpected CAA conversion (libdns.CAA): %#v", rr)
@@ -274,7 +274,7 @@ func TestConvertFromLibdnsRecord_ParseRRData(t *testing.T) {
 
 	// SRV
 	rr := libdns.RR{Name: "_sip._tcp", TTL: 3600 * time.Second, Type: "SRV", Data: fmt.Sprintf("10 20 5060 %s", fmt.Sprintf("sip.%s", zone))}
-	rec := provider.convertFromLibdnsRecord(rr, zone)
+	rec := provider.fromLibdnsRR(rr, zone)
 	if rec.Priority != 10 || rec.Weight != 20 || rec.PortInt != 5060 || rec.Target != fmt.Sprintf("sip.%s", zone) {
 		t.Fatalf("SRV parsing failed: %#v", rec)
 	}

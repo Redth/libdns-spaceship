@@ -11,7 +11,8 @@ To use this provider, you need a Spaceship API token. Configure the provider as 
 
 ```go
 provider := &libdnsspaceship.Provider{
-    APIToken: "your-spaceship-api-token",
+    APIKey:    "your-spaceship-api-key",
+    APISecret: "your-spaceship-api-secret",
 }
 ```
 
@@ -19,8 +20,9 @@ Optionally, you can customize the API base URL (defaults to `https://api.spacesh
 
 ```go
 provider := &libdnsspaceship.Provider{
-    APIToken: "your-spaceship-api-token", 
-    BaseURL:  "https://custom-api.spaceship.com",
+    APIKey:    "your-spaceship-api-key",
+    APISecret: "your-spaceship-api-secret",
+    BaseURL:   "https://custom-api.spaceship.com",
 }
 ```
 
@@ -39,7 +41,8 @@ import (
 
 func main() {
     provider := &libdnsspaceship.Provider{
-        APIToken: "your-spaceship-api-token",
+        APIKey:    "your-spaceship-api-key",
+        APISecret: "your-spaceship-api-secret",
     }
     
     zone := "example.com."

@@ -115,7 +115,7 @@ func (s *spaceshipRecordUnion) UnmarshalJSON(data []byte) error {
 	// helper to unmarshal if present
 	unmarshal := func(key string, v interface{}) {
 		if b, ok := raw[key]; ok {
-			_ = json.Unmarshal(b, v)
+			json.Unmarshal(b, v) // ignore errors for flexible parsing
 		}
 	}
 	unmarshal("type", &s.Type)

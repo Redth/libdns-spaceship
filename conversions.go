@@ -9,7 +9,7 @@ import (
 	"github.com/libdns/libdns"
 )
 
-// convertToLibdnsRecord converts a spaceshipRecord (API) to a libdns.Record
+// toLibdnsRR converts a spaceshipRecordUnion (API) to a libdns.Record
 func (p *Provider) toLibdnsRR(sr spaceshipRecordUnion, zone string) libdns.Record {
 	// normalize name relative to zone
 	name := strings.TrimSuffix(sr.Name, "."+zone)
@@ -91,7 +91,7 @@ func (p *Provider) toLibdnsRR(sr spaceshipRecordUnion, zone string) libdns.Recor
 	}()}
 }
 
-// convertFromLibdnsRecord converts a libdns.Record into a spaceshipRecord suitable for create/update
+// fromLibdnsRR converts a libdns.Record into a spaceshipRecordUnion suitable for create/update
 func (p *Provider) fromLibdnsRR(lr libdns.Record, zone string) spaceshipRecordUnion {
 	rr := lr.RR()
 	name := rr.Name
@@ -206,11 +206,3 @@ func (p *Provider) fromLibdnsRR(lr libdns.Record, zone string) spaceshipRecordUn
 	return rec
 }
 
-// compatibility wrappers for older method names used by tests and other callers
-func (p *Provider) convertToLibdnsRecord(sr spaceshipRecordUnion, zone string) libdns.Record {
-	return p.toLibdnsRR(sr, zone)
-}
-
-func (p *Provider) convertFromLibdnsRecord(lr libdns.Record, zone string) spaceshipRecordUnion {
-	return p.fromLibdnsRR(lr, zone)
-}
