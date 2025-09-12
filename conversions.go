@@ -1,0 +1,216 @@
+package libdnsspaceship
+
+import (
+	"net/netip"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/libdns/libdns"
+)
+
+// convertToLibdnsRecord converts a spaceshipRecord (API) to a libdns.Record
+func (p *Provider) toLibdnsRR(sr spaceshipRecordUnion, zone string) libdns.Record {
+	// normalize name relative to zone
+	name := strings.TrimSuffix(sr.Name, "."+zone)
+	name = strings.TrimSuffix(name, ".")
+	if name == zone || sr.Name == zone {
+		name = ""
+	}
+	ttl := time.Duration(sr.TTL) * time.Second
+
+	switch strings.ToUpper(sr.Type) {
+	case "A", "AAAA":
+		if sr.Address != "" {
+			if ip, err := netip.ParseAddr(sr.Address); err == nil {
+				return libdns.Address{Name: name, TTL: ttl, IP: ip, ProviderData: sr}
+			}
+		}
+	case "TXT":
+		return libdns.TXT{Name: name, TTL: ttl, Text: sr.Value, ProviderData: sr}
+	case "CNAME":
+		return libdns.CNAME{Name: name, TTL: ttl, Target: sr.Cname, ProviderData: sr}
+	case "MX":
+		return libdns.MX{Name: name, TTL: ttl, Target: sr.Exchange, Preference: uint16(sr.Preference), ProviderData: sr}
+	case "SRV":
+		// extract service/transport from name if present
+		service, transport := "", ""
+		if sr.Name != "" {
+			labels := strings.Split(sr.Name, ".")
+			if len(labels) >= 2 {
+				service = strings.TrimPrefix(labels[0], "_")
+				transport = strings.TrimPrefix(labels[1], "_")
+			}
+		}
+		port := sr.PortInt
+		if port == 0 {
+			switch pv := sr.Port.(type) {
+			case string:
+				if v, err := strconv.Atoi(strings.TrimPrefix(pv, "_")); err == nil {
+					port = v
+				}
+			case float64:
+				port = int(pv)
+			case int:
+				port = pv
+			}
+		}
+		return libdns.SRV{Name: name, TTL: ttl, Service: service, Transport: transport, Priority: uint16(sr.Priority), Weight: uint16(sr.Weight), Port: uint16(port), Target: sr.Target, ProviderData: sr}
+	case "NS":
+		// Use libdns.NS for nameserver records
+		return libdns.NS{Name: name, TTL: ttl, Target: sr.Nameserver, ProviderData: sr}
+	case "CAA":
+		// Use libdns.CAA as the typed representation
+		// convert stored union fields into a libdns.CAA value
+		flag := 0
+		if sr.Flag != nil {
+			flag = *sr.Flag
+		}
+		var f8 uint8
+		if flag < 0 {
+			f8 = 0
+		} else if flag > 255 {
+			f8 = 255
+		} else {
+			f8 = uint8(flag)
+		}
+		return libdns.CAA{Name: name, TTL: ttl, Flags: f8, Tag: sr.Tag, Value: sr.Value, ProviderData: sr}
+	}
+	// Fallback to a generic RR for unsupported or un-special-cased types (PTR/CAA/etc.)
+	return libdns.RR{Name: name, TTL: ttl, Type: sr.Type, Data: func() string {
+		if sr.Pointer != "" {
+			return sr.Pointer
+		}
+		if sr.Value != "" {
+			return sr.Value
+		}
+		if sr.Nameserver != "" {
+			return sr.Nameserver
+		}
+		return ""
+	}()}
+}
+
+// convertFromLibdnsRecord converts a libdns.Record into a spaceshipRecord suitable for create/update
+func (p *Provider) fromLibdnsRR(lr libdns.Record, zone string) spaceshipRecordUnion {
+	rr := lr.RR()
+	name := rr.Name
+	if name == "" {
+		name = "@"
+	} else {
+		name = libdns.AbsoluteName(rr.Name, zone)
+	}
+	rec := spaceshipRecordUnion{ResourceRecordBase: ResourceRecordBase{Name: name, Type: strings.ToUpper(rr.Type), TTL: int(rr.TTL.Seconds())}}
+
+	// MX handled specially
+	if mx, ok := lr.(libdns.MX); ok {
+		rec.Exchange = mx.Target
+		rec.Preference = int(mx.Preference)
+		return rec
+	}
+
+	// Handle SRV records (both typed and textual)
+	if srv, ok := lr.(libdns.SRV); ok {
+		// map libdns.SRV fields into the spaceship payload
+		rec.Service = "_" + strings.TrimPrefix(srv.Service, "_")
+		rec.Protocol = "_" + strings.TrimPrefix(srv.Transport, "_")
+		rec.Priority = int(srv.Priority)
+		rec.Weight = int(srv.Weight)
+		rec.Target = srv.Target
+		rec.PortInt = int(srv.Port)
+		if rec.PortInt != 0 {
+			rec.Port = rec.PortInt
+		}
+		return rec
+	}
+	if strings.ToUpper(rr.Type) == "SRV" {
+		// Parse textual SRV record
+		parts := strings.Fields(rr.Data)
+		if len(parts) >= 4 {
+			if v, err := strconv.Atoi(parts[0]); err == nil {
+				rec.Priority = v
+			}
+			if v, err := strconv.Atoi(parts[1]); err == nil {
+				rec.Weight = v
+			}
+			if v, err := strconv.Atoi(parts[2]); err == nil {
+				rec.PortInt = v
+				rec.Port = v
+			}
+			rec.Target = strings.Join(parts[3:], " ")
+		}
+		if rr.Name != "" {
+			labels := strings.Split(rr.Name, ".")
+			if len(labels) >= 2 {
+				rec.Service = "_" + strings.TrimPrefix(labels[0], "_")
+				rec.Protocol = "_" + strings.TrimPrefix(labels[1], "_")
+			}
+		}
+		return rec
+	}
+
+	// Handle NS records (both typed and textual)
+	if ns, ok := lr.(libdns.NS); ok {
+		rec.Nameserver = ns.Target
+		return rec
+	}
+	if strings.ToUpper(rr.Type) == "NS" {
+		rec.Nameserver = rr.Data
+		return rec
+	}
+
+	// Handle CAA records (both typed and textual)
+	if caa, ok := lr.(libdns.CAA); ok {
+		// map libdns.CAA into the union structure
+		tmpFlag := new(int)
+		*tmpFlag = int(caa.Flags)
+		rec.Flag = tmpFlag
+		rec.Tag = caa.Tag
+		rec.Value = caa.Value
+		return rec
+	}
+	if strings.ToUpper(rr.Type) == "CAA" {
+		// Parse textual CAA record
+		parts := strings.Fields(rr.Data)
+		if len(parts) >= 3 {
+			if v, err := strconv.Atoi(parts[0]); err == nil {
+				f := v
+				rec.Flag = &f
+			}
+			rec.Tag = parts[1]
+			rec.Value = strings.Join(parts[2:], " ")
+		}
+		return rec
+	}
+
+	switch v := lr.(type) {
+	case libdns.Address:
+		rec.Address = v.IP.String()
+	case libdns.TXT:
+		rec.Value = v.Text
+	case libdns.CNAME:
+		rec.Cname = v.Target
+	case libdns.MX:
+		// already handled
+	case libdns.RR:
+		// Handle remaining textual RR types (PTR and others)
+		switch strings.ToUpper(rr.Type) {
+		case "PTR":
+			rec.Pointer = rr.Data
+		default:
+			rec.Value = rr.Data
+		}
+	default:
+		rec.Value = rr.Data
+	}
+	return rec
+}
+
+// compatibility wrappers for older method names used by tests and other callers
+func (p *Provider) convertToLibdnsRecord(sr spaceshipRecordUnion, zone string) libdns.Record {
+	return p.toLibdnsRR(sr, zone)
+}
+
+func (p *Provider) convertFromLibdnsRecord(lr libdns.Record, zone string) spaceshipRecordUnion {
+	return p.fromLibdnsRR(lr, zone)
+}
