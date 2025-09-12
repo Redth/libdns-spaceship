@@ -747,6 +747,134 @@ func TestLive_DDNS_Updater(t *testing.T) {
 	}
 }
 
+// TestLive_ListAllAndCleanup lists all records in the zone and optionally deletes them all.
+// This test only runs when both LIBDNS_SPACESHIP_RUN_LIVE=1 AND LIBDNS_SPACESHIP_CLEANUP=1 are set.
+// Use this to clean up test data or reset a zone completely.
+// WARNING: This will delete ALL records in the zone!
+func TestLive_ListAllAndCleanup(t *testing.T) {
+	if v := strings.ToLower(os.Getenv("LIBDNS_SPACESHIP_RUN_LIVE")); !(v == "1" || v == "true") {
+		t.Skip("Skipping live integration test; set LIBDNS_SPACESHIP_RUN_LIVE=1 to run")
+	}
+	if v := strings.ToLower(os.Getenv("LIBDNS_SPACESHIP_CLEANUP")); !(v == "1" || v == "true") {
+		t.Skip("Skipping cleanup test; set LIBDNS_SPACESHIP_CLEANUP=1 to run (WARNING: deletes all records)")
+	}
+
+	provider := NewProviderFromEnv()
+	if provider.APIKey == "" || provider.APISecret == "" {
+		t.Skip("Skipping live integration: missing API credentials in environment")
+	}
+
+	zone := getTestZone()
+	ctx := context.Background()
+
+	t.Logf("=== LISTING ALL RECORDS IN ZONE: %s ===", zone)
+	
+	// Get all records
+	records, err := provider.GetRecords(ctx, zone)
+	if err != nil {
+		t.Fatalf("Failed to get records: %v", err)
+	}
+
+	if len(records) == 0 {
+		t.Logf("No records found in zone %s", zone)
+		return
+	}
+
+	// Group records by type for better display
+	recordsByType := make(map[string][]libdns.Record)
+	for _, r := range records {
+		rr := r.RR()
+		recordsByType[rr.Type] = append(recordsByType[rr.Type], r)
+	}
+
+	t.Logf("Found %d total records across %d types:", len(records), len(recordsByType))
+	
+	// Display all records grouped by type
+	for recordType, recs := range recordsByType {
+		t.Logf("\n--- %s Records (%d) ---", recordType, len(recs))
+		for i, r := range recs {
+			rr := r.RR()
+			switch rec := r.(type) {
+			case libdns.Address:
+				t.Logf("  %d. %s %s %v → %s", i+1, rr.Name, recordType, rr.TTL, rec.IP.String())
+			case libdns.TXT:
+				t.Logf("  %d. %s %s %v → \"%s\"", i+1, rr.Name, recordType, rr.TTL, rec.Text)
+			case libdns.CNAME:
+				t.Logf("  %d. %s %s %v → %s", i+1, rr.Name, recordType, rr.TTL, rec.Target)
+			case libdns.MX:
+				t.Logf("  %d. %s %s %v → %d %s", i+1, rr.Name, recordType, rr.TTL, rec.Preference, rec.Target)
+			case libdns.SRV:
+				t.Logf("  %d. %s %s %v → %d %d %d %s", i+1, rr.Name, recordType, rr.TTL, rec.Priority, rec.Weight, rec.Port, rec.Target)
+			case libdns.NS:
+				t.Logf("  %d. %s %s %v → %s", i+1, rr.Name, recordType, rr.TTL, rec.Target)
+			case libdns.CAA:
+				t.Logf("  %d. %s %s %v → %d %s \"%s\"", i+1, rr.Name, recordType, rr.TTL, rec.Flags, rec.Tag, rec.Value)
+			default:
+				t.Logf("  %d. %s %s %v → %s", i+1, rr.Name, recordType, rr.TTL, rr.Data)
+			}
+		}
+	}
+
+	t.Logf("\n=== DELETING ALL %d RECORDS ===", len(records))
+	
+	// Separate supported and unsupported records
+	var supportedRecords []libdns.Record
+	var unsupportedCount int
+	
+	for _, r := range records {
+		rr := r.RR()
+		if isSupportedForDeletion(rr.Type) {
+			supportedRecords = append(supportedRecords, r)
+		} else {
+			unsupportedCount++
+			t.Logf("Skipping unsupported record type for deletion: %s %s", rr.Name, rr.Type)
+		}
+	}
+
+	if unsupportedCount > 0 {
+		t.Logf("Note: %d unsupported record types cannot be deleted via this provider", unsupportedCount)
+	}
+
+	if len(supportedRecords) == 0 {
+		t.Logf("No supported records to delete")
+		return
+	}
+
+	// Delete all supported records
+	deleted, err := provider.DeleteRecords(ctx, zone, supportedRecords)
+	if err != nil {
+		t.Fatalf("Failed to delete records: %v", err)
+	}
+
+	t.Logf("Successfully deleted %d records", len(deleted))
+	
+	// Verify deletion by listing again
+	remaining, err := provider.GetRecords(ctx, zone)
+	if err != nil {
+		t.Fatalf("Failed to verify deletion: %v", err)
+	}
+
+	if len(remaining) == 0 {
+		t.Logf("✅ Zone is now empty - all records deleted successfully")
+	} else {
+		t.Logf("⚠️  %d records remain in zone (likely unsupported types that cannot be deleted)", len(remaining))
+		for _, r := range remaining {
+			rr := r.RR()
+			t.Logf("  Remaining: %s %s", rr.Name, rr.Type)
+		}
+	}
+}
+
+// Helper function to check if a record type can be deleted by this provider
+func isSupportedForDeletion(recordType string) bool {
+	switch strings.ToUpper(recordType) {
+	case "A", "AAAA", "TXT", "CNAME", "MX", "SRV", "NS", "CAA":
+		return true
+	default:
+		return false
+	}
+}
+
 // TestLive_MoreTypes exercises several additional record types (AAAA, MX, NS, CAA, TLSA, HTTPS).
 func TestLive_MoreTypes(t *testing.T) {
 	if v := strings.ToLower(os.Getenv("LIBDNS_SPACESHIP_RUN_LIVE")); !(v == "1" || v == "true") {
