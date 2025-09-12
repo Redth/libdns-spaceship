@@ -897,8 +897,16 @@ func TestLive_MoreTypes(t *testing.T) {
 	txt := libdns.TXT{Name: fmt.Sprintf("txt-%s", sub), TTL: 60 * time.Second, Text: "live-test"}
 	ns := libdns.RR{Name: fmt.Sprintf("ns-%s", sub), TTL: 60 * time.Second, Type: "NS", Data: fmt.Sprintf("ns1.%s.%s", sub, zone)}
 
-	// Bundle records and append them
+	// Bundle records for easier cleanup
 	all := []libdns.Record{aaaa, mx, txt, ns}
+
+	// Ensure cleanup even if the test fails
+	defer func() {
+		// best-effort cleanup
+		_, _ = provider.DeleteRecords(ctx, zone, all)
+	}()
+
+	// Append all records
 	for _, r := range all {
 		if _, err := provider.AppendRecords(ctx, zone, []libdns.Record{r}); err != nil {
 			rr := r.RR()
